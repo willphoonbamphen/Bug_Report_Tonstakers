@@ -1,0 +1,69 @@
+────────────────────────────────────────────────────────────
+  Scenario 1 — single loan at max_loan_per_validator (normal flow)
+────────────────────────────────────────────────────────────
+  actual_loan          : 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+  interest_rate        : 25600/16777216  ≈ 0.1526%
+  interest (one round) : 1,525.8789 TON  (1_525_878_906_250 nanoTON)
+  total_loan           : 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+  max_loan_per_validator: 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+
+  Defective check (actual):   total_loan ≤ max_lpv + interest  = 1,001,525.8789 TON  (1_001_525_878_906_250 nanoTON)
+  Correct  check (intended): total_loan ≤ max_lpv              = 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+
+  ✓ passes defective check : True
+  ✓ passes correct  check  : True
+  Δ (excess allowed)       : 1,525.8789 TON  (1_525_878_906_250 nanoTON)
+
+════════════════════════════════════════════════════════════
+  Scenario 2 — accumulated principal across two loans
+  (requires bypassing controller-side multiple_loans_prohibited)
+════════════════════════════════════════════════════════════
+  loan_1 = max_loan_per_validator  : 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+  loan_2 = interest(loan_1)        : 1,525.8789 TON  (1_525_878_906_250 nanoTON)
+  total_loan (accumulated)         : 1,001,525.8789 TON  (1_001_525_878_906_250 nanoTON)
+  max_loan_per_validator           : 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+
+  Defective check: 1001525878906250 ≤ 1001525878906250  → PASS ✓ (bug allows it)
+  Correct  check: 1001525878906250 ≤ 1000000000000000  → FAIL ✗ (should reject)
+
+  Extra TON that bypasses the cap: 1,525.8789 TON  (1_525_878_906_250 nanoTON)
+
+────────────────────────────────────────────────────────────
+  Scenario 3 — production interest rate (~0.01 %/round)
+────────────────────────────────────────────────────────────
+  actual_loan          : 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+  interest_rate        : 1677/16777216  ≈ 0.0100%
+  interest (one round) : 99.9570 TON  (99_956_989_288 nanoTON)
+  total_loan           : 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+  max_loan_per_validator: 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+
+  Defective check (actual):   total_loan ≤ max_lpv + interest  = 1,000,099.9570 TON  (1_000_099_956_989_288 nanoTON)
+  Correct  check (intended): total_loan ≤ max_lpv              = 1,000,000.0000 TON  (1_000_000_000_000_000 nanoTON)
+
+  ✓ passes defective check : True
+  ✓ passes correct  check  : True
+  Δ (excess allowed)       : 99.9570 TON  (99_956_989_288 nanoTON)
+
+════════════════════════════════════════════════════════════
+  SUMMARY
+════════════════════════════════════════════════════════════
+
+  Affected file : contracts/pool.func line 348
+  Error code    : error::total_credit_too_high (0xf103)
+
+  Defective:
+    throw_unless(error::total_credit_too_high,
+                 total_loan <= max_loan_per_validator + interest);
+
+  Fix:
+    throw_unless(error::total_credit_too_high,
+                 total_loan <= max_loan_per_validator);
+
+  Severity: LOW
+    - Not exploitable in isolation: the controller contract prevents
+      multiple concurrent loans via `borrowed_amount` tracking.
+    - Becomes exploitable if the controller-side guard is ever relaxed
+      or if a future code path allows add_loan to accumulate without
+      an intervening close_loan.
+    - Maximum excess = one round's worth of interest on max_loan_per_validator
+      ≈ 100–1 500 TON depending on the interest_rate setting.
